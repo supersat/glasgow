@@ -33,6 +33,7 @@ class ProActionReplayBus(Elaboratable):
 
         m.d.comb += [
             self.pads.par_stb_t.o.eq(self.par_stb),
+            self.pads.par_stb_t.oe.eq(1),
             self.par_ack.eq(self.pads.par_ack_t.i),
             self.pads.d_t.oe.eq(~self.par_ack),
             self.pads.d_t.o.eq(self.do)
@@ -41,7 +42,6 @@ class ProActionReplayBus(Elaboratable):
         with m.If(self.par_ack):
             m.d.sync += [
                 self.di.eq(self.pads.d_t.i),
-                self.par_stb.eq(0)
             ]    
         
         return m
@@ -66,6 +66,7 @@ class ProActionReplaySubtarget(Elaboratable):
                     m.d.sync += self.par_bus.do.eq(self.out_fifo.r_data)
                     m.next = "WAIT-FOR-ACK"
             with m.State("WAIT-FOR-ACK"):
+                m.d.comb += self.par_bus.par_stb.eq(1)
                 with m.If(self.par_bus.par_ack):
                     m.next = "WAIT-FOR-DATA"
             with m.State("WAIT-FOR-DATA"):
@@ -115,6 +116,9 @@ class SaturnProActionReplayApplet(GlasgowApplet):
     async def run(self, device, args):
         iface = await device.demultiplexer.claim_interface(self, self.mux_interface, args,
             write_buffer_size=128)
+        await iface.write(b"IN")
+        res = await iface.read(2)
+        print(res)
 
 
 # -------------------------------------------------------------------------------------------------
