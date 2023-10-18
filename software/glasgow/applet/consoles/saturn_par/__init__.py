@@ -64,7 +64,9 @@ class ProActionReplaySubtarget(Elaboratable):
                 with m.If(self.out_fifo.r_rdy):
                     m.d.comb += self.out_fifo.r_en.eq(1)
                     m.d.sync += self.par_bus.do.eq(self.out_fifo.r_data)
-                    m.next = "WAIT-FOR-ACK"
+                    m.next = "STB-DELAY"
+            with m.State("STB-DELAY"):
+                m.next = "WAIT-FOR-ACK"
             with m.State("WAIT-FOR-ACK"):
                 m.d.comb += self.par_bus.par_stb.eq(1)
                 with m.If(self.par_bus.par_ack):
@@ -97,14 +99,14 @@ class SaturnProActionReplayApplet(GlasgowApplet):
         access.add_pin_set_argument(parser, "d", width=8, default=True)
         access.add_pin_argument(parser, "par_stb", default=True)
         access.add_pin_argument(parser, "par_ack", default=True)
-        
+
 
     def build(self, target, args):
         self.mux_interface = iface = target.multiplexer.claim_interface(self, args)
         subtarget = iface.add_subtarget(ProActionReplaySubtarget(
             pads=iface.get_pads(args, pins=self.__pins, pin_sets=self.__pin_sets),
+            in_fifo=iface.get_in_fifo(),
             out_fifo=iface.get_out_fifo(),
-            in_fifo=iface.get_in_fifo(auto_flush=False),
         ))
         return subtarget
 
@@ -116,9 +118,33 @@ class SaturnProActionReplayApplet(GlasgowApplet):
     async def run(self, device, args):
         iface = await device.demultiplexer.claim_interface(self, self.mux_interface, args,
             write_buffer_size=128)
+
+        # binfile = open('SL.BIN', 'rb')
+        # binfile.seek(0, 2)
+        # binlen = binfile.tell()
+        # binfile.seek(0)
+
+        binfile = open('satdump.bin', 'wb')
+
         await iface.write(b"IN")
         res = await iface.read(2)
-        print(res)
+        print(bytes(res))
+
+        await iface.write(struct.pack(">BLLL", 0x01, 0, 0x06002000, 0x1000))
+        res = await iface.read(13)
+        print(bytes(res))
+
+        zero_chunk = b'\x00'
+
+        for i in range(0x1000):
+            await iface.write(zero_chunk)
+            binfile.write(await iface.read(1))
+
+        binfile.close()
+
+        await iface.write(struct.pack(">LLBB", 0, 0, 0, 0))
+        res = await iface.read(10)
+        print(bytes(res))
 
 
 # -------------------------------------------------------------------------------------------------
