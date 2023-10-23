@@ -710,6 +710,11 @@ class MemoryFloppyApplet(GlasgowApplet):
         finally:
             await floppy_iface.stop()
 
+    @classmethod
+    def tests(cls):
+        from . import test
+        return test.MemoryFloppyAppletTestCase
+
 # -------------------------------------------------------------------------------------------------
 
 class MemoryFloppyAppletTool(GlasgowAppletTool, applet=MemoryFloppyApplet):
@@ -1084,10 +1089,3 @@ class MemoryFloppyAppletTool(GlasgowAppletTool, applet=MemoryFloppyApplet):
 
             if count == 0:
                 state = "IDLE"
-
-# -------------------------------------------------------------------------------------------------
-
-class MemoryFloppyAppletTestCase(GlasgowAppletTestCase, applet=MemoryFloppyApplet):
-    @synthesis_test
-    def test_build(self):
-        self.assertBuilds()

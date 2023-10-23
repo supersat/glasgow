@@ -59,10 +59,14 @@ class _PollerThread(threading.Thread):
 
 
 class GlasgowHardwareDevice:
-    @staticmethod
-    def firmware():
-        with importlib.resources.files(__package__).joinpath("firmware.ihex").open("r") as f:
-            return input_data(f, fmt="ihex")
+    @classmethod
+    def firmware_file(cls):
+        return importlib.resources.files(__package__).joinpath("firmware.ihex")
+
+    @classmethod
+    def firmware_data(cls):
+        with cls.firmware_file().open() as file:
+            return input_data(file, fmt="ihex")
 
     @classmethod
     def _enumerate_devices(cls, usb_context):
@@ -89,7 +93,12 @@ class GlasgowHardwareDevice:
             else:
                 continue
 
-            handle = device.open()
+            try:
+                handle = device.open()
+            except usb1.USBErrorAccess:
+                logger.error("missing permissions to open device %03d/%03d",
+                             device.getBusNumber(), device.getDeviceAddress())
+                continue
             if api_level == 0:
                 logger.debug("found rev%s device without firmware", revision)
             elif api_level != CUR_API_LEVEL:
@@ -126,9 +135,10 @@ class GlasgowHardwareDevice:
 
             # If the device has no firmware or the firmware is too old (or, potentially, too new),
             # load the firmware that we know will work.
-            logger.debug("loading firmware to rev%s device", revision)
+            logger.debug("loading firmware from %r to rev%s device",
+                         str(cls.firmware_file()), revision)
             handle.controlWrite(usb1.REQUEST_TYPE_VENDOR, REQ_RAM, REG_CPUCS, 0, [1])
-            for address, data in cls.firmware():
+            for address, data in cls.firmware_data():
                 while len(data) > 0:
                     handle.controlWrite(usb1.REQUEST_TYPE_VENDOR, REQ_RAM,
                                         address, 0, data[:4096])
@@ -244,23 +254,29 @@ class GlasgowHardwareDevice:
             elif status == usb1.TRANSFER_STALL:
                 result_future.set_exception(usb1.USBErrorPipe())
             elif status == usb1.TRANSFER_NO_DEVICE:
-                result_future.set_exception(GlasgowDeviceError("device lost"))
+                result_future.set_exception(GlasgowDeviceError("device disconnected"))
             else:
                 result_future.set_exception(GlasgowDeviceError(
                     "transfer error: {}".format(usb1.libusb1.libusb_transfer_status(status))))
 
+        def handle_usb_error(func):
+            try:
+                func()
+            except usb1.USBErrorNoDevice:
+                raise GlasgowDeviceError("device disconnected") from None
+
         loop = asyncio.get_event_loop()
         transfer.setCallback(lambda transfer: loop.call_soon_threadsafe(usb_callback, transfer))
-        transfer.submit()
+        handle_usb_error(lambda: transfer.submit())
         try:
             return await result_future
-        except asyncio.CancelledError:
-            try:
-                transfer.cancel()
-                await cancel_future
-            except usb1.USBErrorNotFound:
-                pass # already finished, one way or another
-            raise
+        finally:
+            if result_future.cancelled():
+                try:
+                    handle_usb_error(lambda: transfer.cancel())
+                    await cancel_future
+                except usb1.USBErrorNotFound:
+                    pass # already finished, one way or another
 
     async def control_read(self, request_type, request, value, index, length):
         logger.trace("USB: CONTROL IN type=%#04x request=%#04x "

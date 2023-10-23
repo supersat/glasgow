@@ -212,9 +212,7 @@ class SensorHX711Applet(GlasgowApplet):
                 sample = await hx711.sample()
                 await data_logger.report_data(fields={"n": sample})
 
-# -------------------------------------------------------------------------------------------------
-
-class SensorHX711AppletTestCase(GlasgowAppletTestCase, applet=SensorHX711Applet):
-    @synthesis_test
-    def test_build(self):
-        self.assertBuilds()
+    @classmethod
+    def tests(cls):
+        from . import test
+        return test.SensorHX711AppletTestCase

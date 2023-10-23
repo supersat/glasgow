@@ -448,9 +448,7 @@ class JTAGPinoutApplet(GlasgowApplet):
             self.logger.warning("more than one JTAG interface detected; this is likely a false "
                                 "positive")
 
-# -------------------------------------------------------------------------------------------------
-
-class JTAGPinoutAppletTestCase(GlasgowAppletTestCase, applet=JTAGPinoutApplet):
-    @synthesis_test
-    def test_build(self):
-        self.assertBuilds(args=["--pins-jtag", "0:3"])
+    @classmethod
+    def tests(cls):
+        from . import test
+        return test.JTAGPinoutAppletTestCase

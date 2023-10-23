@@ -1,6 +1,7 @@
 import os
 import sys
 import ast
+import platform
 import logging
 import argparse
 import textwrap
@@ -71,15 +72,30 @@ class TextHelpFormatter(argparse.HelpFormatter):
         return re.sub(r"((?!\n\n)(?!\n\s+(?:\*|\$|\d+\.)).)+(\n*)?", filler, text, flags=re.S)
 
 
+def version_info():
+    glasgow_version = __version__
+    python_version = '.'.join(map(str, sys.version_info[:3]))
+    python_implementation = platform.python_implementation()
+    python_platform = platform.platform()
+    freedesktop_os_name = ""
+    if hasattr(platform, "freedesktop_os_release"): # TODO(py3.9): present in 3.10+
+        try:
+            freedesktop_os_release = platform.freedesktop_os_release()
+            if "PRETTY_NAME" in freedesktop_os_release:
+                freedesktop_os_name = f" {freedesktop_os_release['PRETTY_NAME']}"
+        except OSError:
+            pass
+    return (
+        f"Glasgow {glasgow_version} "
+        f"({python_implementation} {python_version} on {python_platform}{freedesktop_os_name})"
+    )
+
+
 def create_argparser():
     parser = argparse.ArgumentParser(formatter_class=TextHelpFormatter)
 
-    version = "Glasgow version {version} (Python {python_version})" \
-        .format(python_version=".".join(str(n) for n in sys.version_info[:3]),
-                version=__version__)
-
     parser.add_argument(
-        "-V", "--version", action="version", version=version,
+        "-V", "--version", action="version", version=version_info(),
         help="show version and exit")
     parser.add_argument(
         "-v", "--verbose", default=0, action="count",
@@ -133,7 +149,7 @@ def get_argparser():
 
             applet_cls = metadata.applet_cls
 
-            if mode == "test" and not hasattr(applet_cls, "test_cls"):
+            if mode == "test" and applet_cls.tests() is None:
                 continue
             if mode == "tool" and not hasattr(applet_cls, "tool_cls"):
                 continue
@@ -665,6 +681,10 @@ async def _main():
                 task.cancel()
             await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
+            # If the applet task has raised an exception, retrieve it here in case any of the await
+            # statements above will fail; if we don't, asyncio will unnecessarily complain.
+            applet_task.exception()
+
             if do_trace:
                 await device.write_register(target.analyzer.addr_done, 1)
                 await analyzer_task
@@ -811,11 +831,11 @@ async def _main():
                 result.stream.write("\n")
             result.startTest = startTest
             if args.tests == []:
-                suite = loader.loadTestsFromTestCase(applet.test_cls)
+                suite = loader.loadTestsFromTestCase(applet.tests())
                 suite.run(result)
             else:
                 for test in args.tests:
-                    suite = loader.loadTestsFromName(test, module=applet.test_cls)
+                    suite = loader.loadTestsFromName(test, module=applet.tests())
                     suite.run(result)
             if not result.wasSuccessful():
                 for _, traceback in result.errors + result.failures:

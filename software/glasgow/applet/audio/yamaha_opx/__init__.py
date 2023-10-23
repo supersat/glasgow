@@ -147,6 +147,7 @@ import io
 from amaranth import *
 from amaranth.lib import data
 from amaranth.lib.cdc import FFSynchronizer
+from urllib.parse import urlparse
 
 from ....gateware.pads import *
 from ....gateware.clockgen import *
@@ -1014,7 +1015,8 @@ class YamahaOPxWebInterface:
         runner = aiohttp.web.AppRunner(app,
             access_log_format='%a(%{X-Forwarded-For}i) "%r" %s "%{Referer}i" "%{User-Agent}i"')
         await runner.setup()
-        site = aiohttp.web.TCPSite(runner, *endpoint.split(":", 1))
+        parsed_endpoint = urlparse(f"//{endpoint}")
+        site = aiohttp.web.TCPSite(runner, parsed_endpoint.hostname, parsed_endpoint.port)
         await site.start()
         await asyncio.Future()
 
@@ -1247,17 +1249,7 @@ class AudioYamahaOPxApplet(GlasgowApplet):
                 await fut
             args.pcm_file.write(record_fut.result())
 
-# -------------------------------------------------------------------------------------------------
-
-class AudioYamahaOPxAppletTestCase(GlasgowAppletTestCase, applet=AudioYamahaOPxApplet):
-    @synthesis_test
-    def test_build_opl2(self):
-        self.assertBuilds(args=["--device", "OPL2"])
-
-    @synthesis_test
-    def test_build_opl3(self):
-        self.assertBuilds(args=["--device", "OPL3"])
-
-    @synthesis_test
-    def test_build_opm(self):
-        self.assertBuilds(args=["--device", "OPM"])
+    @classmethod
+    def tests(cls):
+        from . import test
+        return test.AudioYamahaOPxAppletTestCase
