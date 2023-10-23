@@ -22,6 +22,7 @@ class ProActionReplayBus(Elaboratable):
         self.pads = pads
 
         self.di = Signal(8)
+        self.resycned_di = Signal(8)
         self.do = Signal(8)
 
         self.par_stb = Signal()
@@ -34,14 +35,18 @@ class ProActionReplayBus(Elaboratable):
         m.d.comb += [
             self.pads.par_stb_t.o.eq(self.par_stb),
             self.pads.par_stb_t.oe.eq(1),
-            self.par_ack.eq(self.pads.par_ack_t.i),
             self.pads.d_t.oe.eq(~self.par_ack),
             self.pads.d_t.o.eq(self.do)
         ]
 
+        m.submodules += [
+            FFSynchronizer(self.pads.par_ack_t.i, self.par_ack),
+            FFSynchronizer(self.pads.d_t.i, self.resycned_di)
+        ]
+        
         with m.If(self.par_ack):
             m.d.sync += [
-                self.di.eq(self.pads.d_t.i),
+                self.di.eq(self.resycned_di),
             ]    
         
         return m
