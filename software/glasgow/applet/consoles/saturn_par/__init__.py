@@ -11,6 +11,7 @@ from amaranth import *
 from amaranth.lib import data
 from amaranth.lib.cdc import FFSynchronizer
 
+from ....support.arepl import *
 from ....gateware.pads import *
 from ....gateware.clockgen import *
 from ....protocol.vgm import *
@@ -69,8 +70,10 @@ class ProActionReplaySubtarget(Elaboratable):
                 with m.If(self.out_fifo.r_rdy):
                     m.d.comb += self.out_fifo.r_en.eq(1)
                     m.d.sync += self.par_bus.do.eq(self.out_fifo.r_data)
-                    m.next = "STB-DELAY"
-            with m.State("STB-DELAY"):
+                    m.next = "STB-DELAY-0"
+            with m.State("STB-DELAY-0"):
+                m.next = "STB-DELAY-1"
+            with m.State("STB-DELAY-1"):
                 m.next = "WAIT-FOR-ACK"
             with m.State("WAIT-FOR-ACK"):
                 m.d.comb += self.par_bus.par_stb.eq(1)
@@ -86,6 +89,73 @@ class ProActionReplaySubtarget(Elaboratable):
 
         return m
 
+
+class SaturnProActionReplayInterface:
+    def __init__(self, lower):
+        self.lower = lower
+
+    async def _sync(self):
+        await self.lower.write(b"IN")
+        res = await self.lower.read(2)
+        assert res == b"DO"
+
+    async def _begin_dump_mem(self, start_addr, length):
+        await self.lower.write(struct.pack(">BL", 0x01, 0))
+        res = await self.lower.read(5)
+        # If the Pro Action Replay is in the menu, it will reject the memory dump request
+        assert res != struct.pack(">L", 0x200000)
+        await self.lower.write(struct.pack(">LL", start_addr, length))
+        await self.lower.read(8)
+        
+    async def _end_dump_mem(self):
+        await self.lower.write(struct.pack(">BLLBB", 0, 0, 0, 0, 0))
+        res = await self.lower.read(11)
+        assert res[-2:] == b"OK"
+        return res[0]
+
+    async def _read_bulk_bytes(self, length):
+        zero_chunk = b'\x00' * length
+        await self.lower.write(zero_chunk)
+        return await self.lower.read(length)
+
+    async def _begin_mem_upload(self,start_addr, length, execute):
+        await self.lower.write(struct.pack(">BLLB", 0x09, start_addr, length, 1 if execute else 0))
+        res = await self.lower.read(10)
+
+    async def _write_bulk_bytes(self, bytes):
+        await self.lower.write(bytes)
+        return await self.lower.read(len(bytes))
+
+    async def dump_mem(self, address, length):
+        await self._sync()
+        await self._begin_dump_mem(address, length)
+        buf = b""
+        while length > 0:
+            if length > 128:
+                dump_len = 128
+            else:
+                dump_len = length
+            buf += await self._read_bulk_bytes(dump_len)
+            length -= dump_len
+        chksum = await self._end_dump_mem()
+        assert chksum == sum(buf) & 0xff
+        return buf
+    
+    async def upload_executable(self, address, data, execute):
+        length = len(data)
+        await self._sync()
+        await self._begin_mem_upload(address, length, execute)
+        idx = 0
+        while idx < length:
+            if length - idx > 128:
+                xfer_len = 128
+            else:
+                xfer_len = length - idx
+            self.logger.info(f"Writing {xfer_len} bytes at {idx}")
+            await self._write_bulk_bytes(data[idx:idx + xfer_len])
+            idx += xfer_len
+    
+    
 
 class SaturnProActionReplayApplet(GlasgowApplet):
     logger = logging.getLogger(__name__)
@@ -119,38 +189,17 @@ class SaturnProActionReplayApplet(GlasgowApplet):
     def add_run_arguments(cls, parser, access):
         super().add_run_arguments(parser, access)
 
-
+    
     async def run(self, device, args):
         iface = await device.demultiplexer.claim_interface(self, self.mux_interface, args,
             write_buffer_size=128)
-
-        # binfile = open('SL.BIN', 'rb')
-        # binfile.seek(0, 2)
-        # binlen = binfile.tell()
-        # binfile.seek(0)
-
-        binfile = open('satdump.bin', 'wb')
-
-        await iface.write(b"IN")
-        res = await iface.read(2)
-        print(bytes(res))
-
-        await iface.write(struct.pack(">BLLL", 0x01, 0, 0x06002000, 0x1000))
-        res = await iface.read(13)
-        print(bytes(res))
-
-        zero_chunk = b'\x00'
-
-        for i in range(0x1000):
-            await iface.write(zero_chunk)
-            binfile.write(await iface.read(1))
-
-        binfile.close()
-
-        await iface.write(struct.pack(">LLBBB", 0, 0, 0, 0, 0))
-        res = await iface.read(11)
-        print(bytes(res))
-
+        return iface
+   
+    async def repl(self, device, args, iface):
+        iface = SaturnProActionReplayInterface(iface)
+        self.logger.info("dropping to REPL; use 'help(iface)' to see available APIs")
+        await AsyncInteractiveConsole(locals={"device":device, "iface":iface, "args":args},
+            run_callback=device.demultiplexer.flush).interact()
 
 # -------------------------------------------------------------------------------------------------
 
