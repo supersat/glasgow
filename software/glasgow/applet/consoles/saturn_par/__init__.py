@@ -147,8 +147,8 @@ class SaturnProActionReplayApplet(GlasgowApplet):
 
         binfile.close()
 
-        await iface.write(struct.pack(">LLBB", 0, 0, 0, 0))
-        res = await iface.read(10)
+        await iface.write(struct.pack(">LLBBB", 0, 0, 0, 0, 0))
+        res = await iface.read(11)
         print(bytes(res))
 
 
