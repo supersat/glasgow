@@ -74,6 +74,12 @@ class ProActionReplaySubtarget(Elaboratable):
             with m.State("STB-DELAY-0"):
                 m.next = "STB-DELAY-1"
             with m.State("STB-DELAY-1"):
+                m.next = "STB-DELAY-2"
+            with m.State("STB-DELAY-2"):
+                m.next = "STB-DELAY-3"
+            with m.State("STB-DELAY-3"):
+                m.next = "STB-DELAY-4"
+            with m.State("STB-DELAY-4"):
                 m.next = "WAIT-FOR-ACK"
             with m.State("WAIT-FOR-ACK"):
                 m.d.comb += self.par_bus.par_stb.eq(1)
@@ -95,9 +101,14 @@ class SaturnProActionReplayInterface:
         self.lower = lower
 
     async def _sync(self):
-        await self.lower.write(b"IN")
-        res = await self.lower.read(2)
-        assert res == b"DO"
+        print("Establishing sync...")
+        while True:
+            await self.lower.write(b"I")
+            if await self.lower.read(1) == b"D":
+                await self.lower.write(b"N")
+                if await self.lower.read(1) == b"O":
+                    break
+        print("Synced!")
 
     async def _begin_dump_mem(self, start_addr, length):
         await self.lower.write(struct.pack(">BL", 0x01, 0))
